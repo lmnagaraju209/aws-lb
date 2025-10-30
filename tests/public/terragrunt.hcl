@@ -6,22 +6,11 @@ generate "provider" {
   path      = "provider.tf"
   if_exists = "overwrite_terragrunt"
   contents  = <<EOF
-provider "aws" {
-  region  = var.region
-  profile = "my-profile" # or remove and rely on env AWS_PROFILE
-  # To assume a role instead of a named profile:
-  # assume_role {
-  #   role_arn     = "arn:aws:iam::123456789012:role/TerraformExecutionRole"
-  #   session_name = "terragrunt"
-  # }
-}
+provider "aws" {}
 EOF
 }
 
-include {
-  # This should eventually be us-east-2
-  path = "${get_repo_root()}/../../terraform/regions/us-east-1/terragrunt.hcl"
-}
+## Removed external include; region and vpc_id are now set below in inputs.
 
 locals {
   subnet_tier   = "public"
@@ -31,8 +20,9 @@ locals {
 }
 
 inputs = {
-  # region inherited from parent terragrunt.hcl
-  # vpc_id inherited from parent terragrunt.hcl
+  # Auto-read from environment (no file edits needed)
+  region = get_env("AWS_REGION", "us-east-2")
+  vpc_id = get_env("VPC_ID", "")
 
   project     = local.project
   environment = local.environment
