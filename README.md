@@ -1,3 +1,95 @@
+## AWS Load Balancer Module (Terragrunt-first)
+
+This repository provisions an AWS ALB/NLB using `terraform-aws-modules/alb/aws` and manages Route53 records and optional WAF. All examples and commands below use Terragrunt.
+
+### What it creates
+- ALB/NLB and its security group
+- Route53 public/private alias records
+- Optional WAF (Classic or v2)
+
+### Requirements
+- Terragrunt and Terraform (Terraform >= 1.3.0)
+- AWS credentials with permissions for ELBv2, SG, Route53, and optionally WAF
+
+### Choose AWS account and region
+Use an AWS profile (recommended):
+
+```powershell
+setx AWS_PROFILE my-profile
+setx AWS_REGION us-east-2
+aws sts get-caller-identity
+```
+
+If using AWS SSO:
+
+```powershell
+aws sso login --profile my-profile
+```
+
+### Terragrunt provider block (examples include this)
+Adjust `profile` or remove it to rely on `AWS_PROFILE`:
+
+```hcl
+generate "provider" {
+  path      = "provider.tf"
+  if_exists = "overwrite_terragrunt"
+  contents  = <<EOF
+provider "aws" {
+  region  = var.region
+  profile = "my-profile"
+  # assume_role {
+  #   role_arn     = "arn:aws:iam::123456789012:role/TerraformExecutionRole"
+  #   session_name = "terragrunt"
+  # }
+}
+EOF
+}
+```
+
+### Inputs (via Terragrunt inputs = { ... })
+- Required: `vpc_id`, `project`, `environment`, `dns_records`
+- Common: `subnet_tags`, `listeners`, `target_groups`, `enable_deletion_protection`
+- WAF options: `waf_enabled`, `waf_version` (1 or 2), `waf_trusted_access_only`, `waf_web_acl_arn_v2`
+
+### Run with Terragrunt
+Public LB example:
+
+```powershell
+cd tests\public
+terragrunt init
+terragrunt apply -auto-approve
+```
+
+Private LB example:
+
+```powershell
+cd tests\private
+terragrunt init
+terragrunt apply -auto-approve
+```
+
+Destroy (ensure deletion protection is disabled):
+
+```powershell
+terragrunt apply -auto-approve -var 'enable_deletion_protection=false'
+terragrunt destroy -auto-approve
+``;
+
+### Enable WAFv2 (optional)
+
+```hcl
+inputs = {
+  waf_enabled        = true
+  waf_version        = 2
+  waf_web_acl_arn_v2 = "arn:aws:wafv2:REGION:ACCOUNT_ID:regional/webacl/NAME/UUID"
+}
+```
+
+### Troubleshooting (Terragrunt)
+- No changes/no-op: verify account/region (`aws sts get-caller-identity`), parent include provides `region`/`vpc_id`, and required inputs exist
+- Destroy blocked: first apply `enable_deletion_protection=false`, then destroy
+- State/workspace confusion: run `terragrunt info` and ensure you’re in the intended stack folder
+
 ## AWS Load Balancer Terraform Module
 
 This repository provisions an AWS Application/Network Load Balancer using the community `terraform-aws-modules/alb/aws` module and manages optional Route53 records and WAF association.
@@ -177,5 +269,6 @@ If you continue to see no-ops or blocked destroys, share the outputs of:
 - `terraform workspace show`
 - `terraform state list`
 - `terraform plan -out tfplan && terraform show -no-color tfplan`
+
 
 
