@@ -2,337 +2,301 @@
 
 ## Overview
 
-This is a **Terraform module** for deploying and managing AWS Application Load Balancers (ALB) or Network Load Balancers (NLB) with advanced features including DNS integration, WAF protection, and comprehensive security configurations.
+This is a **Terraform module** that creates and manages AWS Application Load Balancers (ALB) or Network Load Balancers (NLB) with integrated features including:
+
+- **Load Balancer Creation**: Creates ALB or NLB based on configuration
+- **DNS Management**: Automatically creates Route53 DNS records (both public and private)
+- **Security Groups**: Configures security groups with custom ingress/egress rules
+- **WAF Integration**: Optional AWS WAF (Web Application Firewall) association
+- **Target Groups**: Manages target groups for routing traffic to EC2 instances or Auto Scaling Groups
+- **Listeners**: Configures HTTP/HTTPS listeners with SSL/TLS support
+- **Access Logs**: Optional logging to S3 buckets
+- **Health Checks**: Configurable health check settings for target groups
 
 ## What Does This Code Do?
 
-This Terraform module automates the creation and configuration of:
+### Main Components:
 
-### 1. **Load Balancer (ALB/NLB)**
-   - Creates either an Application Load Balancer or Network Load Balancer
-   - Supports both **internal** (private) and **internet-facing** (public) configurations
-   - Automatically determines load balancer type based on subnet tags
-   - Configures idle timeout and XFF (X-Forwarded-For) headers
+1. **Load Balancer (`main.tf`)**
+   - Uses the official AWS ALB Terraform module (v9.x)
+   - Creates an Application or Network Load Balancer
+   - Configures it based on subnet placement (public vs private/internal)
+   - Associates with WAF if configured and public-facing
 
-### 2. **Security Groups**
-   - Creates and manages security groups for the load balancer
-   - Configures custom ingress and egress rules
-   - Supports both CIDR-based and security group reference-based rules
-
-### 3. **DNS Records (Route53)**
-   - Automatically creates Route53 DNS records pointing to the load balancer
-   - Supports both **public** and **private** hosted zones
-   - Supports multiple routing policies:
+2. **DNS Records (`dns.tf`)**
+   - Creates Route53 A records that point to the load balancer
+   - Supports both public and private hosted zones
+   - Supports advanced routing policies:
      - Weighted routing
      - Latency-based routing
      - Geolocation routing
      - Failover routing
 
-### 4. **Target Groups**
-   - Configures target groups for routing traffic to backend instances
-   - Supports multiple target types (instance, IP, Lambda)
-   - Configurable health checks
-   - Supports both EC2 instances and Auto Scaling Groups
+3. **Security & Access Control**
+   - Creates security groups with customizable rules
+   - Integrates with AWS WAF for web application protection
+   - Supports WAF Classic (v1) and WAF v2
 
-### 5. **Listeners**
-   - Creates HTTPS and HTTP listeners
-   - Supports SSL/TLS termination with ACM certificates
-   - Configures listener rules for host-based or path-based routing
-   - Supports HTTP to HTTPS redirects
-
-### 6. **WAF Integration**
-   - Optional AWS WAF (Web Application Firewall) integration
-   - Supports both WAF Classic (v1) and WAFv2
-   - Different WAF policies for public vs trusted-only access
-   - Automatically disabled for internal load balancers
-
-### 7. **Access Logging**
-   - Configures S3 bucket logging for load balancer access logs
-   - Default logging enabled to centralized log bucket
-
-### 8. **Tagging & Organization**
-   - Automatic tagging with project, environment, and terraform-managed tags
-   - Consistent naming convention: `{project}-{environment}`
+4. **Infrastructure Components**
+   - Target groups for routing traffic to backend instances
+   - Listeners for handling incoming requests
+   - Health checks to monitor backend instance health
+   - Access logging for audit and troubleshooting
 
 ## Architecture
 
 ```
 Internet/VPC
-    ↓
-[Load Balancer] ← [Route53 DNS Records]
-    ↓
-[Security Group Rules]
-    ↓
-[Listeners (HTTP/HTTPS)]
-    ↓
-[Target Groups]
-    ↓
-[EC2 Instances / Auto Scaling Groups]
+    |
+    v
+[Load Balancer] <-- [WAF (Optional)]
+    |
+    +-- [Security Group]
+    +-- [Listeners: HTTP/HTTPS]
+    +-- [Target Groups]
+    |       |
+    |       v
+    |   [EC2 Instances / Auto Scaling Groups]
+    |
+    v
+[Route53 DNS Records]
+    +-- Public Records
+    +-- Private Records
 ```
 
 ## Can This Run on Any AWS Account?
 
-### ⚠️ **NO - Not Without Modifications**
+### Short Answer: **No, not without modifications**
 
-This module is **pre-configured for a specific organization** (Versatile Credit Inc.) and has hardcoded values that will **NOT** work on other AWS accounts:
+### Why Not?
 
-### Issues That Prevent Universal Use:
+This module contains **hardcoded values** specific to a particular organization:
 
-1. **Hardcoded WAF ACL IDs** (`variables.tf` lines 143-153)
-   - Default WAF ACL IDs are specific to the original account
-   - You'll need to replace these with your own WAF ACLs or disable WAF
+1. **WAF ACL IDs** - Hardcoded specific WAF ACL identifiers
+2. **S3 Bucket Names** - Hardcoded log bucket names with specific naming convention
+3. **Certificate ARNs** - Test configurations reference specific SSL certificates
+4. **Security Group IDs** - Test files reference specific security groups
+5. **Instance IDs** - Test files reference specific EC2 instances
+6. **VPC/Subnet Dependencies** - Expects specific VPC and subnet configurations
 
-2. **Hardcoded S3 Log Bucket** (`locals.tf` line 11)
-   - References: `vci-loadbalancer-logs-${region}`
-   - This bucket must exist in your account, or you need to change the name
+### What Needs to Change?
 
-3. **Test Configuration Examples**
-   - Certificate ARNs in test files are specific to the original account
-   - Security Group IDs reference existing infrastructure
-   - VPC and subnet configurations are account-specific
-
-4. **Route53 Hosted Zones**
-   - Requires existing Route53 hosted zones
-   - Zone names in tests (`vtile.io`) won't exist in your account
-
-### ✅ **To Make It Work on Your AWS Account:**
-
-You need to:
-
-1. **Modify or Remove WAF Configuration:**
-   ```hcl
-   # Option 1: Disable WAF
-   waf_enabled = false
-   
-   # Option 2: Provide your own WAF ACL IDs
-   waf_web_acl_id_public = "your-waf-acl-id"
-   waf_web_acl_id_trusted = "your-waf-acl-id"
-   ```
-
-2. **Create or Specify Your S3 Log Bucket:**
-   - Create an S3 bucket for ALB logs with proper permissions
-   - Or modify `locals.tf` to use your bucket name
-
-3. **Update Test Configurations:**
-   - Replace certificate ARNs with your ACM certificates
-   - Update VPC IDs, subnet tags, and security group references
-   - Modify Route53 zone names to match your domains
-
-4. **Ensure Prerequisites Exist:**
-   - VPC with properly tagged subnets
-   - Route53 hosted zones (if using DNS features)
-   - ACM certificates (if using HTTPS)
-   - IAM permissions for creating ALB resources
+See the `CHANGES.md` file for detailed instructions on adapting this module for your AWS account.
 
 ## Prerequisites
 
-### AWS Resources Required:
-- ✅ VPC with subnets tagged appropriately (`tier` and `environment` tags)
-- ✅ Route53 Hosted Zones (for DNS record creation)
-- ✅ ACM SSL/TLS Certificates (for HTTPS listeners)
-- ✅ S3 bucket for access logs (with ALB write permissions)
-- ✅ (Optional) WAF Web ACLs if WAF is enabled
+To use this module, you need:
 
-### AWS Permissions Required:
-- EC2 (VPC, Subnets, Security Groups)
-- Elastic Load Balancing (ALB/NLB)
-- Route53 (DNS records)
-- ACM (Certificate access)
-- S3 (Log bucket access)
-- WAF/WAFv2 (if enabled)
+1. **Terraform**: Version >= 0.14
+2. **AWS Provider**: Version ~> 5.0
+3. **AWS Account with**:
+   - VPC with subnets (public and/or private)
+   - Route53 hosted zones
+   - (Optional) S3 bucket for access logs
+   - (Optional) SSL/TLS certificates in AWS Certificate Manager
+   - (Optional) WAF ACLs configured
+4. **AWS Credentials**: Configured for Terraform to access your account
 
-### Tools Required:
-- Terraform >= 0.14
-- AWS Provider ~> 5.0
-- AWS CLI configured with appropriate credentials
+## Module Inputs
+
+### Required Variables
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `vpc_id` | string | ID of the VPC where resources will be deployed |
+| `project` | string | Project name for tagging and naming resources |
+| `environment` | string | Environment name (dev/test/prod/etc.) |
+| `dns_records` | list(object) | List of DNS records to create pointing to the LB |
+
+### Important Optional Variables
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `region` | string | "us-east-2" | AWS region for deployment |
+| `load_balancer_type` | string | "application" | Type of LB: "application" or "network" |
+| `subnet_tags` | object | tier="private", environment="test" | Tags to identify subnets for LB |
+| `waf_enabled` | bool | true | Enable WAF association |
+| `waf_web_acl_id_public` | string | (hardcoded) | WAF ACL ID for public LBs |
+| `waf_web_acl_id_trusted` | string | (hardcoded) | WAF ACL ID for trusted access |
+| `enable_deletion_protection` | bool | true | Prevent accidental deletion |
+| `listeners` | map | {} | Listener configurations (HTTP/HTTPS) |
+| `target_groups` | map | {} | Target group configurations |
+| `security_group_ingress_rules` | any | {} | Ingress rules for security group |
+| `security_group_egress_rules` | any | {} | Egress rules for security group |
+| `access_logs` | object | (uses defaults) | S3 bucket configuration for logs |
+| `idle_timeout` | number | 120 | Connection idle timeout in seconds |
+
+## Module Outputs
+
+| Output | Description |
+|--------|-------------|
+| `lb_arn` | ARN of the load balancer |
+| `lb_dns_name` | DNS name of the load balancer |
+| `lb_internal` | Whether the LB is internal or internet-facing |
+| `aws_route53_records_public` | Public DNS records created |
+| `aws_route53_records_private` | Private DNS records created |
+| `listeners` | Map of listener configurations |
+| `target_groups` | Map of target group configurations |
+| `security_group_id` | Security group ID |
+| `security_group_arn` | Security group ARN |
+| `waf_enabled` | Whether WAF is enabled |
+| `waf_web_acl_id` | WAF ACL ID associated |
 
 ## Usage Example
 
 ```hcl
 module "load_balancer" {
-  source = "./aws-lb-main-latest"
-  
-  # Required Variables
-  vpc_id      = "vpc-xxxxx"
+  source = "path/to/this/module"
+
+  # Required
+  vpc_id      = "vpc-12345678"
   project     = "my-app"
   environment = "production"
-  
-  # Subnet Configuration
+
+  # Subnet selection
   subnet_tags = {
-    tier        = "public"  # "public" for internet-facing, "private" for internal
-    environment = "production"
+    tier        = "public"
+    environment = "prod"
   }
-  
-  # Security Group Rules
+
+  # DNS records
+  dns_records = [
+    {
+      name      = "myapp.example.com"
+      zone_name = "example.com"
+      type      = "A"
+    }
+  ]
+
+  # Security rules
   security_group_ingress_rules = {
+    http = {
+      from_port   = 80
+      to_port     = 80
+      ip_protocol = "tcp"
+      cidr_ipv4   = "0.0.0.0/0"
+    }
     https = {
       from_port   = 443
       to_port     = 443
       ip_protocol = "tcp"
       cidr_ipv4   = "0.0.0.0/0"
-      description = "HTTPS from Internet"
     }
   }
-  
+
   security_group_egress_rules = {
-    backend = {
-      from_port   = 443
-      to_port     = 443
-      ip_protocol = "tcp"
-      cidr_ipv4   = "10.0.0.0/16"
-      description = "To backend instances"
+    all_outbound = {
+      from_port   = 0
+      to_port     = 0
+      ip_protocol = "-1"
+      cidr_ipv4   = "0.0.0.0/0"
     }
   }
-  
-  # DNS Records
-  dns_records = [
-    {
-      name      = "app.example.com"
-      zone_name = "example.com"
-      type      = "A"
-    }
-  ]
-  
+
   # Listeners
   listeners = {
     https = {
       port            = 443
       protocol        = "HTTPS"
-      certificate_arn = "arn:aws:acm:us-east-2:xxxxx:certificate/xxxxx"
+      certificate_arn = "arn:aws:acm:region:account:certificate/xyz"
       
-      forward = {
-        target_group_key = "backend"
+      # Default action
+      fixed_response = {
+        content_type = "text/plain"
+        message_body = "Not Found"
+        status_code  = 404
       }
     }
   }
-  
-  # Target Groups
+
+  # Target groups
   target_groups = {
-    backend = {
-      name         = "my-app-backend"
-      protocol     = "HTTPS"
-      port         = 443
+    web_servers = {
+      name     = "my-web-servers"
+      port     = 443
+      protocol = "HTTPS"
       health_check = {
         path = "/health"
       }
     }
   }
-  
-  # Disable WAF if not configured
+
+  # Disable WAF or provide your own ACL ID
   waf_enabled = false
   
-  # Access Logs (make sure bucket exists)
-  access_logs = {
-    enabled = true
-    bucket  = "my-alb-logs-bucket"
-    prefix  = "my-app-production"
-  }
+  # Optional: Allow deletion for testing
+  enable_deletion_protection = false
 }
 ```
 
-## Key Variables
+## Key Features Explained
 
-| Variable | Description | Required | Default |
-|----------|-------------|----------|---------|
-| `vpc_id` | VPC ID where ALB will be created | Yes | - |
-| `project` | Project name for tagging | Yes | - |
-| `environment` | Environment (dev/test/prod) | Yes | - |
-| `subnet_tags` | Tags to identify subnets | No | `{tier="private", environment="test"}` |
-| `load_balancer_type` | Type: "application" or "network" | No | "application" |
-| `listeners` | Map of listener configurations | No | `{}` |
-| `target_groups` | Map of target group configurations | No | `{}` |
-| `dns_records` | List of Route53 DNS records | Yes | - |
-| `waf_enabled` | Enable WAF protection | No | `true` |
-| `enable_deletion_protection` | Prevent accidental deletion | No | `true` |
+### 1. Internal vs Public Load Balancers
+The module automatically determines if the LB should be internal or internet-facing based on subnet tags:
+- If `subnet_tags.tier == "public"` → Internet-facing LB
+- Otherwise → Internal LB
 
-## Outputs
+### 2. WAF Integration
+- WAF is automatically enabled for public-facing load balancers
+- Supports both WAF Classic (v1) and WAF v2
+- Two modes: "public" and "trusted" access with different ACL IDs
 
-The module provides these outputs:
-- `lb_arn` - ARN of the load balancer
-- `lb_dns_name` - DNS name of the load balancer
-- `security_group_id` - ID of the security group
-- `target_groups` - Map of created target groups
-- `listeners` - Map of created listeners
-- `aws_route53_records_public` - Public DNS records created
-- `aws_route53_records_private` - Private DNS records created
+### 3. DNS Management
+- Creates both public and private Route53 records
+- Public records only created for internet-facing LBs
+- Private records always created
+- Supports complex routing policies
 
-## How to Deploy
-
-### 1. Initialize Terraform
-```bash
-terraform init
-```
-
-### 2. Review the Plan
-```bash
-terraform plan
-```
-
-### 3. Apply the Configuration
-```bash
-terraform apply
-```
-
-### 4. Destroy Resources (when needed)
-```bash
-terraform destroy
-```
+### 4. Access Logging
+- Default behavior: Logs to S3 bucket `vci-loadbalancer-logs-{region}`
+- Can be disabled or customized via `access_logs` variable
 
 ## Important Notes
 
-⚠️ **Security Considerations:**
-- Deletion protection is enabled by default (`enable_deletion_protection = true`)
-- Always review security group rules before deployment
-- Use appropriate WAF rules for public-facing load balancers
-- Ensure SSL/TLS certificates are valid and not expired
+⚠️ **Before Using This Module:**
 
-⚠️ **Cost Implications:**
-- Load Balancers have hourly charges (~$16-22/month for ALB)
-- Data transfer charges apply
-- WAF has additional charges if enabled
-- S3 storage costs for access logs
+1. Review and update all hardcoded values (see `CHANGES.md`)
+2. Ensure you have the required AWS resources (VPC, subnets, certificates, etc.)
+3. Test in a non-production environment first
+4. Be aware of costs associated with Load Balancers, data transfer, and WAF
+5. Deletion protection is enabled by default - set to `false` for testing
 
-⚠️ **Account-Specific Configuration Required:**
-- This module requires customization for your AWS account
-- Review and update all hardcoded values
-- Ensure all prerequisite resources exist
+## Testing
 
-## Troubleshooting
+The module includes test configurations in the `tests/` directory:
+- `tests/public/` - Configuration for public (internet-facing) load balancer
+- `tests/private/` - Configuration for internal load balancer
 
-### Common Issues:
-
-1. **"Subnet not found" errors**
-   - Verify subnets have correct tags matching `subnet_tags`
-   
-2. **"Certificate not found" errors**
-   - Ensure ACM certificate ARN is correct and in the same region
-   
-3. **"S3 bucket access denied" errors**
-   - Verify S3 bucket policy allows ALB to write logs
-   - Check bucket exists in the correct region
-
-4. **"WAF ACL not found" errors**
-   - Either disable WAF or provide valid WAF ACL IDs for your account
+These tests use Terragrunt and reference a parent configuration file.
 
 ## Version History
 
-- **v1.1.0** (2023-10-31) - Updated to support v9.x of upstream ALB module
-- **v1.0.1** (2023-10-23) - Fixed target groups mapping issue
-- **v1.0.0** (2023-10-19) - Initial release
+See `CHANGELOG.md` for version history and changes.
+
+## Support & Troubleshooting
+
+### Common Issues:
+
+1. **"No subnets found"** - Check that your VPC has subnets with the correct tags
+2. **WAF association fails** - Verify WAF ACL exists and is in the correct region
+3. **Certificate errors** - Ensure ACM certificate is in the same region as the LB
+4. **Access log errors** - Verify S3 bucket exists and has proper permissions
 
 ## License
 
-This module appears to be proprietary to Versatile Credit Inc. Check with the original authors for licensing information.
+This module is intended for internal use. Consult your organization's licensing policy.
 
-## Support
+## Credits
 
-For issues or questions:
-1. Review the test examples in `tests/` directory
-2. Check AWS ALB documentation
-3. Verify all prerequisites are met
-4. Ensure Terraform and AWS provider versions are correct
+This module uses the official AWS ALB Terraform module:
+- Source: `terraform-aws-modules/alb/aws`
+- Version: ~> 9.0
 
----
+## Contributing
 
-**Summary:** This is a powerful and feature-rich Terraform module for AWS Load Balancers, but it requires customization and proper AWS infrastructure before it can be used in your account. Make sure to review and modify all account-specific configurations before deploying.
+When making changes:
+1. Update version in `CHANGELOG.md`
+2. Test both public and private configurations
+3. Update documentation as needed
+4. Follow semantic versioning
 
