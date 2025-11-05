@@ -1,274 +1,338 @@
-## AWS Load Balancer Module (Terragrunt-first)
+# AWS Load Balancer Terraform Module
 
-This repository provisions an AWS ALB/NLB using `terraform-aws-modules/alb/aws` and manages Route53 records and optional WAF. All examples and commands below use Terragrunt.
+## Overview
 
-### What it creates
-- ALB/NLB and its security group
-- Route53 public/private alias records
-- Optional WAF (Classic or v2)
+This is a **Terraform module** for deploying and managing AWS Application Load Balancers (ALB) or Network Load Balancers (NLB) with advanced features including DNS integration, WAF protection, and comprehensive security configurations.
 
-### Requirements
-- Terragrunt and Terraform (Terraform >= 1.3.0)
-- AWS credentials with permissions for ELBv2, SG, Route53, and optionally WAF
+## What Does This Code Do?
 
-### Choose AWS account and region
-Use an AWS profile (recommended):
+This Terraform module automates the creation and configuration of:
 
-```powershell
-setx AWS_PROFILE my-profile
-setx AWS_REGION us-east-2
-aws sts get-caller-identity
+### 1. **Load Balancer (ALB/NLB)**
+   - Creates either an Application Load Balancer or Network Load Balancer
+   - Supports both **internal** (private) and **internet-facing** (public) configurations
+   - Automatically determines load balancer type based on subnet tags
+   - Configures idle timeout and XFF (X-Forwarded-For) headers
+
+### 2. **Security Groups**
+   - Creates and manages security groups for the load balancer
+   - Configures custom ingress and egress rules
+   - Supports both CIDR-based and security group reference-based rules
+
+### 3. **DNS Records (Route53)**
+   - Automatically creates Route53 DNS records pointing to the load balancer
+   - Supports both **public** and **private** hosted zones
+   - Supports multiple routing policies:
+     - Weighted routing
+     - Latency-based routing
+     - Geolocation routing
+     - Failover routing
+
+### 4. **Target Groups**
+   - Configures target groups for routing traffic to backend instances
+   - Supports multiple target types (instance, IP, Lambda)
+   - Configurable health checks
+   - Supports both EC2 instances and Auto Scaling Groups
+
+### 5. **Listeners**
+   - Creates HTTPS and HTTP listeners
+   - Supports SSL/TLS termination with ACM certificates
+   - Configures listener rules for host-based or path-based routing
+   - Supports HTTP to HTTPS redirects
+
+### 6. **WAF Integration**
+   - Optional AWS WAF (Web Application Firewall) integration
+   - Supports both WAF Classic (v1) and WAFv2
+   - Different WAF policies for public vs trusted-only access
+   - Automatically disabled for internal load balancers
+
+### 7. **Access Logging**
+   - Configures S3 bucket logging for load balancer access logs
+   - Default logging enabled to centralized log bucket
+
+### 8. **Tagging & Organization**
+   - Automatic tagging with project, environment, and terraform-managed tags
+   - Consistent naming convention: `{project}-{environment}`
+
+## Architecture
+
+```
+Internet/VPC
+    ↓
+[Load Balancer] ← [Route53 DNS Records]
+    ↓
+[Security Group Rules]
+    ↓
+[Listeners (HTTP/HTTPS)]
+    ↓
+[Target Groups]
+    ↓
+[EC2 Instances / Auto Scaling Groups]
 ```
 
-If using AWS SSO:
+## Can This Run on Any AWS Account?
 
-```powershell
-aws sso login --profile my-profile
-```
+### ⚠️ **NO - Not Without Modifications**
 
-### Terragrunt provider block (examples include this)
-Adjust `profile` or remove it to rely on `AWS_PROFILE`:
+This module is **pre-configured for a specific organization** (Versatile Credit Inc.) and has hardcoded values that will **NOT** work on other AWS accounts:
 
-```hcl
-generate "provider" {
-  path      = "provider.tf"
-  if_exists = "overwrite_terragrunt"
-  contents  = <<EOF
-provider "aws" {
-  region  = var.region
-  profile = "my-profile"
-  # assume_role {
-  #   role_arn     = "arn:aws:iam::123456789012:role/TerraformExecutionRole"
-  #   session_name = "terragrunt"
-  # }
-}
-EOF
-}
-```
+### Issues That Prevent Universal Use:
 
-### Inputs (via Terragrunt inputs = { ... })
-- Required: `vpc_id`, `project`, `environment`, `dns_records`
-- Common: `subnet_tags`, `listeners`, `target_groups`, `enable_deletion_protection`
-- WAF options: `waf_enabled`, `waf_version` (1 or 2), `waf_trusted_access_only`, `waf_web_acl_arn_v2`
+1. **Hardcoded WAF ACL IDs** (`variables.tf` lines 143-153)
+   - Default WAF ACL IDs are specific to the original account
+   - You'll need to replace these with your own WAF ACLs or disable WAF
 
-### Run with Terragrunt
-Public LB example:
+2. **Hardcoded S3 Log Bucket** (`locals.tf` line 11)
+   - References: `vci-loadbalancer-logs-${region}`
+   - This bucket must exist in your account, or you need to change the name
 
-```powershell
-cd tests\public
-terragrunt init
-terragrunt apply -auto-approve
-```
+3. **Test Configuration Examples**
+   - Certificate ARNs in test files are specific to the original account
+   - Security Group IDs reference existing infrastructure
+   - VPC and subnet configurations are account-specific
 
-Private LB example:
+4. **Route53 Hosted Zones**
+   - Requires existing Route53 hosted zones
+   - Zone names in tests (`vtile.io`) won't exist in your account
 
-```powershell
-cd tests\private
-terragrunt init
-terragrunt apply -auto-approve
-```
+### ✅ **To Make It Work on Your AWS Account:**
 
-Destroy (ensure deletion protection is disabled):
+You need to:
 
-```powershell
-terragrunt apply -auto-approve -var 'enable_deletion_protection=false'
-terragrunt destroy -auto-approve
-``;
+1. **Modify or Remove WAF Configuration:**
+   ```hcl
+   # Option 1: Disable WAF
+   waf_enabled = false
+   
+   # Option 2: Provide your own WAF ACL IDs
+   waf_web_acl_id_public = "your-waf-acl-id"
+   waf_web_acl_id_trusted = "your-waf-acl-id"
+   ```
 
-### Enable WAFv2 (optional)
+2. **Create or Specify Your S3 Log Bucket:**
+   - Create an S3 bucket for ALB logs with proper permissions
+   - Or modify `locals.tf` to use your bucket name
 
-```hcl
-inputs = {
-  waf_enabled        = true
-  waf_version        = 2
-  waf_web_acl_arn_v2 = "arn:aws:wafv2:REGION:ACCOUNT_ID:regional/webacl/NAME/UUID"
-}
-```
+3. **Update Test Configurations:**
+   - Replace certificate ARNs with your ACM certificates
+   - Update VPC IDs, subnet tags, and security group references
+   - Modify Route53 zone names to match your domains
 
-### Troubleshooting (Terragrunt)
-- No changes/no-op: verify account/region (`aws sts get-caller-identity`), parent include provides `region`/`vpc_id`, and required inputs exist
-- Destroy blocked: first apply `enable_deletion_protection=false`, then destroy
-- State/workspace confusion: run `terragrunt info` and ensure you’re in the intended stack folder
-
-## AWS Load Balancer Terraform Module
-
-This repository provisions an AWS Application/Network Load Balancer using the community `terraform-aws-modules/alb/aws` module and manages optional Route53 records and WAF association.
-
-### What this module creates
-- **ALB/NLB** via `module "alb"` in `main.tf`
-- **Security group** for the LB with configurable ingress/egress rules
-- **Route53 records** (public and/or private) in `dns.tf` pointing to the LB
-- **Optional WAF association** (`aws_wafregional_web_acl_association`) if enabled
-
-### Key files
-- `versions.tf`: pins Terraform and AWS provider versions
-- `variables.tf`: inputs (region, vpc_id, project, environment, DNS, listeners, target groups, WAF, etc.)
-- `locals.tf`: derived values like `name`, `internal`, default access logs config, and common tags
-- `main.tf`: ALB module, subnet discovery by tags, optional WAF v1 association, and WAF v2 via `web_acl_arn`
-- `dns.tf`: Route53 public/private alias records to the ALB
-- `outputs.tf`: useful outputs (ALB ARN/DNS, security group, listeners, target groups)
-- `tests/private|public/terragrunt.hcl`: example Terragrunt inputs for private/public LBs (for reference/testing)
-
----
+4. **Ensure Prerequisites Exist:**
+   - VPC with properly tagged subnets
+   - Route53 hosted zones (if using DNS features)
+   - ACM certificates (if using HTTPS)
+   - IAM permissions for creating ALB resources
 
 ## Prerequisites
-- Terraform >= 1.3.0 and AWS provider ~> 5.0
-- AWS credentials configured for the target account (one of):
-  - Environment variables: `AWS_PROFILE` or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (and optional `AWS_SESSION_TOKEN`)
-  - Shared config/credentials files (`~/.aws/config`, `~/.aws/credentials`)
-  - IAM Role via SSO or instance profile
 
-> Account is selected by how you authenticate to AWS (profile/keys/role) — there is no hardcoded account ID in this module.
+### AWS Resources Required:
+- ✅ VPC with subnets tagged appropriately (`tier` and `environment` tags)
+- ✅ Route53 Hosted Zones (for DNS record creation)
+- ✅ ACM SSL/TLS Certificates (for HTTPS listeners)
+- ✅ S3 bucket for access logs (with ALB write permissions)
+- ✅ (Optional) WAF Web ACLs if WAF is enabled
 
----
+### AWS Permissions Required:
+- EC2 (VPC, Subnets, Security Groups)
+- Elastic Load Balancing (ALB/NLB)
+- Route53 (DNS records)
+- ACM (Certificate access)
+- S3 (Log bucket access)
+- WAF/WAFv2 (if enabled)
 
-## Inputs you must provide
-Required:
-- `vpc_id`: VPC where the ALB/NLB is deployed
-- `project`: project tag and naming prefix
-- `environment`: environment tag and naming suffix
-- `dns_records`: list of DNS records to create; each record has `name` and `zone_name` at minimum
+### Tools Required:
+- Terraform >= 0.14
+- AWS Provider ~> 5.0
+- AWS CLI configured with appropriate credentials
 
-Common optional inputs:
-- `region` (default `us-east-2`)
-- `subnet_tags`: tags that select the subnets for the LB (defaults to `{ tier = "private", environment = "test" }`)
-- `listeners`: listener map per `terraform-aws-modules/alb/aws` expectations
-- `target_groups`: target groups map keyed by your names
-- `enable_deletion_protection` (default `true`)
-- `waf_enabled`, `waf_version`, `waf_trusted_access_only`, `waf_web_acl_arn_v2`
+## Usage Example
 
-See `variables.tf` for the full schema and defaults.
-
----
-
-## How region and account are chosen
-- **AWS Account**: determined by your AWS credentials (e.g., `AWS_PROFILE=my-prod`). There is no variable for account ID in this module.
-- **AWS Region**: the module exposes a `region` variable (default `us-east-2`) used for naming/logs. The actual provider region is set outside this module via provider configuration or (when using Terragrunt) the parent `terragrunt.hcl`.
-
-If you run plain Terraform in this folder, set the provider region using environment variables, for example:
-
-```bash
-setx AWS_PROFILE my-profile
-setx AWS_REGION us-east-2
+```hcl
+module "load_balancer" {
+  source = "./aws-lb-main-latest"
+  
+  # Required Variables
+  vpc_id      = "vpc-xxxxx"
+  project     = "my-app"
+  environment = "production"
+  
+  # Subnet Configuration
+  subnet_tags = {
+    tier        = "public"  # "public" for internet-facing, "private" for internal
+    environment = "production"
+  }
+  
+  # Security Group Rules
+  security_group_ingress_rules = {
+    https = {
+      from_port   = 443
+      to_port     = 443
+      ip_protocol = "tcp"
+      cidr_ipv4   = "0.0.0.0/0"
+      description = "HTTPS from Internet"
+    }
+  }
+  
+  security_group_egress_rules = {
+    backend = {
+      from_port   = 443
+      to_port     = 443
+      ip_protocol = "tcp"
+      cidr_ipv4   = "10.0.0.0/16"
+      description = "To backend instances"
+    }
+  }
+  
+  # DNS Records
+  dns_records = [
+    {
+      name      = "app.example.com"
+      zone_name = "example.com"
+      type      = "A"
+    }
+  ]
+  
+  # Listeners
+  listeners = {
+    https = {
+      port            = 443
+      protocol        = "HTTPS"
+      certificate_arn = "arn:aws:acm:us-east-2:xxxxx:certificate/xxxxx"
+      
+      forward = {
+        target_group_key = "backend"
+      }
+    }
+  }
+  
+  # Target Groups
+  target_groups = {
+    backend = {
+      name         = "my-app-backend"
+      protocol     = "HTTPS"
+      port         = 443
+      health_check = {
+        path = "/health"
+      }
+    }
+  }
+  
+  # Disable WAF if not configured
+  waf_enabled = false
+  
+  # Access Logs (make sure bucket exists)
+  access_logs = {
+    enabled = true
+    bucket  = "my-alb-logs-bucket"
+    prefix  = "my-app-production"
+  }
+}
 ```
 
-Or pass `-var "region=us-east-2"` as needed.
+## Key Variables
 
----
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `vpc_id` | VPC ID where ALB will be created | Yes | - |
+| `project` | Project name for tagging | Yes | - |
+| `environment` | Environment (dev/test/prod) | Yes | - |
+| `subnet_tags` | Tags to identify subnets | No | `{tier="private", environment="test"}` |
+| `load_balancer_type` | Type: "application" or "network" | No | "application" |
+| `listeners` | Map of listener configurations | No | `{}` |
+| `target_groups` | Map of target group configurations | No | `{}` |
+| `dns_records` | List of Route53 DNS records | Yes | - |
+| `waf_enabled` | Enable WAF protection | No | `true` |
+| `enable_deletion_protection` | Prevent accidental deletion | No | `true` |
 
-## Usage with plain Terraform
-From `aws-lb-main/`:
+## Outputs
 
+The module provides these outputs:
+- `lb_arn` - ARN of the load balancer
+- `lb_dns_name` - DNS name of the load balancer
+- `security_group_id` - ID of the security group
+- `target_groups` - Map of created target groups
+- `listeners` - Map of created listeners
+- `aws_route53_records_public` - Public DNS records created
+- `aws_route53_records_private` - Private DNS records created
+
+## How to Deploy
+
+### 1. Initialize Terraform
 ```bash
 terraform init
-terraform apply \
-  -var "vpc_id=vpc-0123456789abcdef0" \
-  -var "project=myapp" \
-  -var "environment=dev" \
-  -var 'dns_records=[{"name":"myapp-dev","zone_name":"example.com"}]' \
-  -var 'subnet_tags={"tier":"public","environment":"dev"}' \
-  -var 'enable_deletion_protection=false'
 ```
 
-Notes:
-- Ensure your VPC and subnets exist; subnets are discovered by `var.subnet_tags`.
-- Set `listeners` and `target_groups` as needed for your application.
+### 2. Review the Plan
+```bash
+terraform plan
+```
 
-Destroy:
+### 3. Apply the Configuration
+```bash
+terraform apply
+```
 
+### 4. Destroy Resources (when needed)
 ```bash
 terraform destroy
 ```
 
-If deletion protection was enabled, first apply with `-var 'enable_deletion_protection=false'`, then destroy.
+## Important Notes
 
----
+⚠️ **Security Considerations:**
+- Deletion protection is enabled by default (`enable_deletion_protection = true`)
+- Always review security group rules before deployment
+- Use appropriate WAF rules for public-facing load balancers
+- Ensure SSL/TLS certificates are valid and not expired
 
-## Usage with Terragrunt (examples)
-The `tests/private` and `tests/public` folders show example inputs only. They include a parent `terragrunt.hcl` outside this repo path to set `region`/`vpc_id`. Adapt these examples to your environment.
+⚠️ **Cost Implications:**
+- Load Balancers have hourly charges (~$16-22/month for ALB)
+- Data transfer charges apply
+- WAF has additional charges if enabled
+- S3 storage costs for access logs
 
-Key places to change when copying those examples:
-- Certificates ARNs in `listeners.https` (ACM must be in the same region as the ALB)
-- `dns_zone_name`, `project`, `environment`
-- `security_group_*_rules`, `target_groups`
-- The parent include that sets `region` and `vpc_id`
+⚠️ **Account-Specific Configuration Required:**
+- This module requires customization for your AWS account
+- Review and update all hardcoded values
+- Ensure all prerequisite resources exist
 
----
+## Troubleshooting
 
-## Where to change AWS account details
-- **Account**: switch your AWS credentials/profile (e.g., `AWS_PROFILE`, SSO, or keys). That’s how you point Terraform to a different AWS account.
-- **Region**: set `AWS_REGION`/`AWS_DEFAULT_REGION` or your provider/Terragrunt parent; optionally also set the module `var.region` for names/logs consistency.
+### Common Issues:
 
-There is no account ID variable inside this module; credentials determine the target account.
+1. **"Subnet not found" errors**
+   - Verify subnets have correct tags matching `subnet_tags`
+   
+2. **"Certificate not found" errors**
+   - Ensure ACM certificate ARN is correct and in the same region
+   
+3. **"S3 bucket access denied" errors**
+   - Verify S3 bucket policy allows ALB to write logs
+   - Check bucket exists in the correct region
 
----
+4. **"WAF ACL not found" errors**
+   - Either disable WAF or provide valid WAF ACL IDs for your account
 
-## Why "no resource changes" may occur
-If `terraform plan/apply` shows no changes:
-1. You are running in a clean state with missing required variables — Terraform would normally error. If it doesn’t, verify you are in the right folder and state file.
-2. The state already reflects the desired config — verify you are using the same state backend and workspace as the previous apply.
-3. You ran inside `tests/*` without a valid parent `terragrunt.hcl` — Terragrunt may resolve to no inputs or a different root, resulting in no-op.
-4. `count`/`for_each` are empty because inputs are empty — ensure `dns_records`, `listeners`, and `target_groups` are set appropriately.
+## Version History
 
-Checklist:
-- Run `terraform providers` and `terraform workspace show` to ensure you are in the expected context
-- Run `terraform state list` to see what resources Terraform thinks exist
-- Confirm required variables are passed (especially `vpc_id`, `project`, `environment`, `dns_records`)
+- **v1.1.0** (2023-10-31) - Updated to support v9.x of upstream ALB module
+- **v1.0.1** (2023-10-23) - Fixed target groups mapping issue
+- **v1.0.0** (2023-10-19) - Initial release
 
----
+## License
 
-## Why destroy might not work
-Common blockers:
-1. **Deletion protection enabled**: If the ALB was created with `enable_deletion_protection = true`, AWS will refuse deletion. Fix: run an apply to set `enable_deletion_protection=false`, then run `terraform destroy`.
-2. **State drift or different workspace**: If your current state doesn’t contain the resources, `destroy` will do nothing. Check `terraform state list` and that you’re using the correct backend/workspace.
-3. **Insufficient IAM permissions**: Ensure the AWS identity can delete ALB, security groups, and Route53 records.
-4. **Dependent resources**: If other stacks reference the security group or target groups, detach them first.
-
----
-
-## Minimal variable example
-
-```hcl
-vpc_id      = "vpc-0123456789abcdef0"
-project     = "myapp"
-environment = "dev"
-
-subnet_tags = {
-  tier        = "public"
-  environment = "dev"
-}
-
-dns_records = [
-  { name = "myapp-dev", zone_name = "example.com" }
-]
-
-listeners = {
-  http-https-redirect = {
-    port     = 80
-    protocol = "HTTP"
-    redirect = { port = "443", protocol = "HTTPS", status_code = "HTTP_301" }
-  }
-}
-
-target_groups = {
-  app = {
-    name         = "myapp-dev-app"
-    target_type  = "instance"
-    protocol     = "HTTP"
-    port         = 80
-    health_check = { path = "/" }
-  }
-}
-```
-
----
+This module appears to be proprietary to Versatile Credit Inc. Check with the original authors for licensing information.
 
 ## Support
-If you continue to see no-ops or blocked destroys, share the outputs of:
-- `terraform version`
-- `terraform workspace show`
-- `terraform state list`
-- `terraform plan -out tfplan && terraform show -no-color tfplan`
 
+For issues or questions:
+1. Review the test examples in `tests/` directory
+2. Check AWS ALB documentation
+3. Verify all prerequisites are met
+4. Ensure Terraform and AWS provider versions are correct
 
+---
+
+**Summary:** This is a powerful and feature-rich Terraform module for AWS Load Balancers, but it requires customization and proper AWS infrastructure before it can be used in your account. Make sure to review and modify all account-specific configurations before deploying.
 

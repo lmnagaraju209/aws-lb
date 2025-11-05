@@ -1,16 +1,11 @@
 terraform {
-  source = "../..///"
+  source = "..///"
 }
 
-generate "provider" {
-  path      = "provider.tf"
-  if_exists = "overwrite_terragrunt"
-  contents  = <<EOF
-provider "aws" {}
-EOF
+include "module-testing" {
+  path = "${get_repo_root()}/../terraform-config/terragrunt-module-testing.hcl"
+  expose = true
 }
-
-## Removed external include; region and vpc_id are now set below in inputs.
 
 locals {
   subnet_tier   = "public"
@@ -20,9 +15,8 @@ locals {
 }
 
 inputs = {
-  # Auto-read from environment (no file edits needed)
-  region = get_env("AWS_REGION", "us-east-2")
-  vpc_id = get_env("VPC_ID", "")
+  # region inherited from parent terragrunt.hcl
+  # vpc_id inherited from parent terragrunt.hcl
 
   project     = local.project
   environment = local.environment

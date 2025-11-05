@@ -6,7 +6,8 @@ data "aws_subnets" "alb" {
   tags = var.subnet_tags
 }
 
-# WAF v2 handled via module `web_acl_arn` when waf_version == 2
+#TODO: wafv2
+# set var.web_acl_arn in alb module.
 
 resource "aws_wafregional_web_acl_association" "alb" {
   count = local.waf_enabled && var.waf_version == 1 ? 1 : 0
@@ -40,9 +41,6 @@ module "alb" {
 
   access_logs                = var.access_logs != null ? var.access_logs : local.access_logs_default
   enable_deletion_protection = var.enable_deletion_protection
-
-  # When using WAFv2, the module supports direct association via ARN
-  web_acl_arn = local.waf_enabled && var.waf_version == 2 ? var.waf_web_acl_arn_v2 : null
 
   tags = local.tags
 }

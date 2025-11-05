@@ -140,12 +140,6 @@ variable "waf_version" {
   default     = 1
 }
 
-variable "waf_web_acl_arn_v2" {
-  type        = string
-  description = "(Optional) WAFv2 Web ACL ARN to associate with the ALB when waf_version = 2 and waf_enabled = true."
-  default     = null
-}
-
 variable "waf_web_acl_id_public" {
   type        = string
   description = "(Optional) The ID of the WAF ACL to be used when alb_primary_public_access is set to true."
